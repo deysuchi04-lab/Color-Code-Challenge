@@ -2,7 +2,11 @@ import pygame
 import random
 import time
 
+from client import NetworkClient
+
+
 pygame.init()
+
 
 # =========================================================
 # WINDOW
@@ -11,8 +15,13 @@ pygame.init()
 WIDTH = 900
 HEIGHT = 650
 
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Colour Code Challenge")
+screen = pygame.display.set_mode(
+    (WIDTH, HEIGHT)
+)
+
+pygame.display.set_caption(
+    "Colour Code Challenge"
+)
 
 clock = pygame.time.Clock()
 
@@ -21,25 +30,72 @@ clock = pygame.time.Clock()
 # FONTS
 # =========================================================
 
-TITLE_FONT = pygame.font.Font(None, 64)
-BIG_FONT = pygame.font.Font(None, 52)
-FONT = pygame.font.Font(None, 36)
-SMALL_FONT = pygame.font.Font(None, 28)
+TITLE_FONT = pygame.font.Font(
+    None,
+    64
+)
+
+BIG_FONT = pygame.font.Font(
+    None,
+    52
+)
+
+FONT = pygame.font.Font(
+    None,
+    36
+)
+
+SMALL_FONT = pygame.font.Font(
+    None,
+    28
+)
 
 
 # =========================================================
 # COLOURS
 # =========================================================
 
-BACKGROUND = (25, 25, 35)
+BACKGROUND = (
+    25,
+    25,
+    35
+)
 
-WHITE = (255, 255, 255)
-GRAY = (160, 160, 160)
+WHITE = (
+    255,
+    255,
+    255
+)
 
-RED = (220, 60, 60)
-BLUE = (60, 110, 230)
-GREEN = (60, 190, 100)
-YELLOW = (230, 200, 60)
+GRAY = (
+    160,
+    160,
+    160
+)
+
+RED = (
+    220,
+    60,
+    60
+)
+
+BLUE = (
+    60,
+    110,
+    230
+)
+
+GREEN = (
+    60,
+    190,
+    100
+)
+
+YELLOW = (
+    230,
+    200,
+    60
+)
 
 COLORS = [
     RED,
@@ -61,6 +117,7 @@ COLOR_NAMES = [
 # =========================================================
 
 MENU = "menu"
+WAITING = "waiting"
 COUNTDOWN = "countdown"
 SHOW_SEQUENCE = "show_sequence"
 PLAYING = "playing"
@@ -74,15 +131,22 @@ game_state = MENU
 # =========================================================
 
 sequence = []
+
 player_sequence = []
 
 round_number = 1
+
 score = 0
 
 countdown_start = 0
+
 sequence_start = 0
 
 message = ""
+
+waiting_for_players = False
+
+input_locked = False
 
 
 # =========================================================
@@ -90,11 +154,17 @@ message = ""
 # =========================================================
 
 start_button = pygame.Rect(
-    325, 330, 250, 70
+    325,
+    330,
+    250,
+    70
 )
 
 play_again_button = pygame.Rect(
-    325, 420, 250, 70
+    325,
+    420,
+    250,
+    70
 )
 
 
@@ -115,7 +185,9 @@ for i in range(4):
         130
     )
 
-    color_buttons.append(button)
+    color_buttons.append(
+        button
+    )
 
 
 # =========================================================
@@ -149,31 +221,9 @@ def draw_text(
             topleft=(x, y)
         )
 
-    screen.blit(image, rect)
-
-
-# =========================================================
-# GENERATE NEW COLOUR
-# =========================================================
-
-def generate_new_colour():
-
-    # First colour can be anything
-    if len(sequence) == 0:
-
-        return random.randint(0, 3)
-
-    # Don't allow same colour twice in a row
-    previous = sequence[-1]
-
-    available = [
-        i
-        for i in range(4)
-        if i != previous
-    ]
-
-    return random.choice(
-        available
+    screen.blit(
+        image,
+        rect
     )
 
 
@@ -200,8 +250,11 @@ def show_sequence():
     global sequence_start
     global game_state
     global player_sequence
+    global input_locked
 
     player_sequence = []
+
+    input_locked = False
 
     sequence_start = time.time()
 
@@ -219,6 +272,9 @@ def reset_game():
     global round_number
     global score
     global message
+    global game_state
+    global waiting_for_players
+    global input_locked
 
     sequence = []
 
@@ -230,39 +286,65 @@ def reset_game():
 
     message = ""
 
-    # Generate FIRST colour
-    sequence.append(
-        generate_new_colour()
-    )
+    waiting_for_players = True
 
-    # Countdown → Memorize
-    start_countdown()
+    input_locked = True
+
+    # -----------------------------------------------------
+    # IMPORTANT:
+    # The server will create the first sequence.
+    # -----------------------------------------------------
+
+    game_state = WAITING
 
 
 # =========================================================
 # NEXT ROUND
 # =========================================================
+#
+# The server controls the next round.
+#
+# Therefore this function is kept only for compatibility
+# with the original structure and is no longer called
+# locally.
+# =========================================================
 
 def next_round():
 
-    global round_number
-    global sequence
-    global player_sequence
+    pass
 
-    # Increase round
-    round_number += 1
 
-    # Add ONE new colour
-    sequence.append(
-        generate_new_colour()
+# =========================================================
+# NETWORK CONNECTION
+# =========================================================
+
+network = NetworkClient()
+
+print()
+print(
+    "Connecting game to Colour Code Challenge Server..."
+)
+
+if network.connect():
+
+    print(
+        "Game connected to server."
     )
 
-    # Clear previous answer
-    player_sequence = []
+else:
 
-    # Round 2 onwards directly
-    # shows the new sequence.
-    show_sequence()
+    print(
+        "Could not connect to server."
+    )
+
+    print(
+        "Make sure server/server.py is running."
+    )
+
+
+player_id = None
+
+server_player_count = 0
 
 
 # =========================================================
@@ -276,10 +358,277 @@ while running:
     clock.tick(60)
 
     # =====================================================
+    # RECEIVE SERVER MESSAGES
+    # =====================================================
+
+    while True:
+
+        network_message = (
+            network.get_message()
+        )
+
+        if network_message is None:
+
+            break
+
+        message_type = (
+            network_message.get(
+                "type"
+            )
+        )
+
+        # =================================================
+        # WELCOME
+        # =================================================
+
+        if message_type == "welcome":
+
+            player_id = (
+                network_message.get(
+                    "player_id"
+                )
+            )
+
+            print()
+
+            print(
+                "Welcome from server."
+            )
+
+            print(
+                f"Player ID: {player_id}"
+            )
+
+        # =================================================
+        # PLAYER COUNT
+        # =================================================
+
+        elif message_type == "player_count":
+
+            server_player_count = (
+                network_message.get(
+                    "count",
+                    0
+                )
+            )
+
+            print(
+                f"Players connected: "
+                f"{server_player_count}"
+            )
+
+        # =================================================
+        # READY ACK
+        # =================================================
+
+        elif message_type == "ready_ack":
+
+            print(
+                "Server confirmed that player is ready."
+            )
+
+        # =================================================
+        # ROUND START
+        # =================================================
+
+        elif message_type == "round_start":
+
+            global_round = (
+                network_message.get(
+                    "round",
+                    1
+                )
+            )
+
+            new_sequence = (
+                network_message.get(
+                    "sequence",
+                    []
+                )
+            )
+
+            scores = (
+                network_message.get(
+                    "scores",
+                    {}
+                )
+            )
+
+            round_number = (
+                global_round
+            )
+
+            sequence = [
+                int(value)
+                for value in new_sequence
+            ]
+
+            # Get this player's score
+
+            if player_id is not None:
+
+                score = scores.get(
+                    str(player_id),
+                    score
+                )
+
+            waiting_for_players = False
+
+            input_locked = False
+
+            print()
+
+            print(
+                "=" * 40
+            )
+
+            print(
+                f"ROUND {round_number}"
+            )
+
+            print(
+                f"Sequence received: "
+                f"{sequence}"
+            )
+
+            print(
+                f"Score: {score}"
+            )
+
+            print(
+                "=" * 40
+            )
+
+            # Round 1 starts with countdown
+
+            if round_number == 1:
+
+                start_countdown()
+
+            else:
+
+                show_sequence()
+
+        # =================================================
+        # WAIT FOR OTHER PLAYERS
+        # =================================================
+
+        elif message_type == "round_wait":
+
+            # ------------------------------------------------
+            # IMPORTANT FIX
+            # ------------------------------------------------
+            #
+            # Do NOT lock the buttons after the first click.
+            #
+            # Only lock input when the player has already
+            # entered the complete sequence.
+            # ------------------------------------------------
+
+            if (
+                len(player_sequence)
+                >= len(sequence)
+                and len(sequence) > 0
+            ):
+
+                waiting_for_players = True
+
+                input_locked = True
+
+                print(
+                    "Waiting for other players..."
+                )
+
+            else:
+
+                # Player still has colours to enter.
+
+                waiting_for_players = False
+
+                input_locked = False
+
+                print(
+                    "Player can continue entering the sequence."
+                )
+
+        # =================================================
+        # GAME OVER
+        # =================================================
+
+        elif message_type == "game_over":
+
+            reason = (
+                network_message.get(
+                    "reason",
+                    "Game Over"
+                )
+            )
+
+            scores = (
+                network_message.get(
+                    "scores",
+                    {}
+                )
+            )
+
+            if player_id is not None:
+
+                score = scores.get(
+                    str(player_id),
+                    score
+                )
+
+            message = reason
+
+            waiting_for_players = False
+
+            input_locked = True
+
+            game_state = GAME_OVER
+
+            print()
+
+            print(
+                "=" * 40
+            )
+
+            print(
+                "GAME OVER"
+            )
+
+            print(
+                reason
+            )
+
+            print(
+                f"Score: {score}"
+            )
+
+            print(
+                "=" * 40
+            )
+
+        # =================================================
+        # OTHER SERVER MESSAGES
+        # =================================================
+
+        else:
+
+            print(
+                "Message from server:",
+                network_message
+            )
+
+
+    # =====================================================
     # EVENTS
     # =====================================================
 
     for event in pygame.event.get():
+
+        # =================================================
+        # QUIT
+        # =================================================
 
         if event.type == pygame.QUIT:
 
@@ -290,24 +639,42 @@ while running:
         # MENU
         # =================================================
 
-        if game_state == MENU:
+        if (
+            event.type
+            == pygame.MOUSEBUTTONDOWN
+            and start_button.collidepoint(
+                event.pos
+            )
+            and game_state == MENU
+        ):
 
-            if event.type == pygame.MOUSEBUTTONDOWN:
+            network.send_message(
+                {
+                    "type":
+                    "player_ready"
+                }
+            )
 
-                if start_button.collidepoint(
-                    event.pos
-                ):
+            print(
+                "Player is ready."
+            )
 
-                    reset_game()
+            reset_game()
 
 
         # =================================================
         # PLAYING
         # =================================================
 
-        elif game_state == PLAYING:
+        elif (
+            game_state == PLAYING
+            and not input_locked
+        ):
 
-            if event.type == pygame.MOUSEBUTTONDOWN:
+            if (
+                event.type
+                == pygame.MOUSEBUTTONDOWN
+            ):
 
                 for i, button in enumerate(
                     color_buttons
@@ -317,11 +684,38 @@ while running:
                         event.pos
                     ):
 
-                        # Add player's choice
-                        player_sequence.append(i)
+                        # ---------------------------------
+                        # ADD LOCAL CLICK
+                        # ---------------------------------
+
+                        player_sequence.append(
+                            i
+                        )
 
                         position = (
-                            len(player_sequence) - 1
+                            len(
+                                player_sequence
+                            )
+                            - 1
+                        )
+
+                        # ---------------------------------
+                        # SEND CLICK TO SERVER
+                        # ---------------------------------
+
+                        network.send_message(
+                            {
+                                "type":
+                                "color_click",
+
+                                "color":
+                                i
+                            }
+                        )
+
+                        print(
+                            f"Colour clicked: "
+                            f"{COLOR_NAMES[i]}"
                         )
 
                         # ---------------------------------
@@ -329,41 +723,105 @@ while running:
                         # ---------------------------------
 
                         if (
-                            player_sequence[position]
-                            != sequence[position]
+                            player_sequence[
+                                position
+                            ]
+                            != sequence[
+                                position
+                            ]
                         ):
 
                             message = (
                                 "Wrong sequence!"
                             )
 
+                            input_locked = True
+
+                            waiting_for_players = False
+
                             game_state = GAME_OVER
 
                         # ---------------------------------
-                        # CORRECT COMPLETE SEQUENCE
+                        # COMPLETE SEQUENCE
                         # ---------------------------------
 
                         elif (
-                            len(player_sequence)
-                            == len(sequence)
+                            len(
+                                player_sequence
+                            )
+                            == len(
+                                sequence
+                            )
                         ):
 
-                            score += 10
+                            # ---------------------------------
+                            # The player has finished.
+                            # Now we can wait for other players.
+                            # ---------------------------------
 
-                            next_round()
+                            input_locked = True
+
+                            waiting_for_players = True
+
+                            print(
+                                "Sequence completed."
+                            )
+
+                        # ---------------------------------
+                        # MORE COLOURS ARE REQUIRED
+                        # ---------------------------------
+
+                        else:
+
+                            # IMPORTANT:
+                            # Keep buttons active.
+                            #
+                            # Example:
+                            #
+                            # Sequence = [0, 2]
+                            #
+                            # First click:
+                            # [0] -> 1 / 2
+                            #
+                            # Second click:
+                            # [0, 2] -> 2 / 2
+
+                            input_locked = False
+
+                            waiting_for_players = False
+
+                        break
 
 
         # =================================================
         # GAME OVER
         # =================================================
 
-        elif game_state == GAME_OVER:
+        elif (
+            game_state == GAME_OVER
+        ):
 
-            if event.type == pygame.MOUSEBUTTONDOWN:
+            if (
+                event.type
+                == pygame.MOUSEBUTTONDOWN
+            ):
 
-                if play_again_button.collidepoint(
-                    event.pos
+                if (
+                    play_again_button.collidepoint(
+                        event.pos
+                    )
                 ):
+
+                    network.send_message(
+                        {
+                            "type":
+                            "player_ready"
+                        }
+                    )
+
+                    print(
+                        "Player is ready again."
+                    )
 
                     reset_game()
 
@@ -374,7 +832,9 @@ while running:
 
     if game_state == MENU:
 
-        screen.fill(BACKGROUND)
+        screen.fill(
+            BACKGROUND
+        )
 
         draw_text(
             "COLOUR CODE",
@@ -415,6 +875,51 @@ while running:
             500
         )
 
+        draw_text(
+            f"Players Online: "
+            f"{server_player_count}",
+            SMALL_FONT,
+            GRAY,
+            WIDTH // 2,
+            545
+        )
+
+
+    # =====================================================
+    # WAITING SCREEN
+    # =====================================================
+
+    elif game_state == WAITING:
+
+        screen.fill(
+            BACKGROUND
+        )
+
+        draw_text(
+            "COLOUR CODE",
+            TITLE_FONT,
+            WHITE,
+            WIDTH // 2,
+            150
+        )
+
+        draw_text(
+            "Waiting for players...",
+            BIG_FONT,
+            GRAY,
+            WIDTH // 2,
+            270
+        )
+
+        draw_text(
+            f"Players Online: "
+            f"{server_player_count}",
+            FONT,
+            WHITE,
+            WIDTH // 2,
+            350
+        )
+
 
     # =====================================================
     # COUNTDOWN
@@ -422,7 +927,9 @@ while running:
 
     elif game_state == COUNTDOWN:
 
-        screen.fill(BACKGROUND)
+        screen.fill(
+            BACKGROUND
+        )
 
         draw_text(
             f"ROUND {round_number}",
@@ -441,10 +948,16 @@ while running:
         )
 
         elapsed = (
-            time.time() - countdown_start
+            time.time()
+            -
+            countdown_start
         )
 
-        number = 3 - int(elapsed)
+        number = (
+            3
+            -
+            int(elapsed)
+        )
 
         if number > 0:
 
@@ -458,8 +971,6 @@ while running:
 
         else:
 
-            # After countdown:
-            # show sequence
             show_sequence()
 
 
@@ -469,7 +980,9 @@ while running:
 
     elif game_state == SHOW_SEQUENCE:
 
-        screen.fill(BACKGROUND)
+        screen.fill(
+            BACKGROUND
+        )
 
         # -----------------------------------------------
         # ROUND
@@ -499,13 +1012,16 @@ while running:
         # CALCULATE BOX SIZE
         # -----------------------------------------------
 
-        sequence_length = len(sequence)
+        sequence_length = (
+            len(sequence)
+        )
 
-        # Available horizontal space
-        available_width = WIDTH - 80
+        available_width = (
+            WIDTH - 80
+        )
 
-        # Normal size
         box_size = 100
+
         gap = 30
 
         # -----------------------------------------------
@@ -515,16 +1031,19 @@ while running:
         if sequence_length >= 7:
 
             box_size = 80
+
             gap = 18
 
         if sequence_length >= 9:
 
             box_size = 65
+
             gap = 12
 
         if sequence_length >= 12:
 
             box_size = 55
+
             gap = 10
 
         # -----------------------------------------------
@@ -532,36 +1051,37 @@ while running:
         # -----------------------------------------------
 
         total_width = (
-            sequence_length * box_size
+            sequence_length
+            * box_size
             +
-            (sequence_length - 1) * gap
+            (sequence_length - 1)
+            * gap
         )
 
         # -----------------------------------------------
         # SAFETY CHECK
         # -----------------------------------------------
 
-        # If the sequence is still too wide,
-        # automatically calculate a smaller box.
-
         if total_width > available_width:
 
             box_size = (
                 available_width
                 -
-                (sequence_length - 1) * gap
+                (sequence_length - 1)
+                * gap
             ) // sequence_length
 
-            # Minimum box size
             box_size = max(
                 box_size,
                 35
             )
 
             total_width = (
-                sequence_length * box_size
+                sequence_length
+                * box_size
                 +
-                (sequence_length - 1) * gap
+                (sequence_length - 1)
+                * gap
             )
 
         # -----------------------------------------------
@@ -569,12 +1089,10 @@ while running:
         # -----------------------------------------------
 
         start_x = (
-            WIDTH - total_width
+            WIDTH
+            -
+            total_width
         ) // 2
-
-        # -----------------------------------------------
-        # VERTICAL POSITION
-        # -----------------------------------------------
 
         y = 250
 
@@ -589,7 +1107,13 @@ while running:
             x = (
                 start_x
                 +
-                i * (box_size + gap)
+                i
+                *
+                (
+                    box_size
+                    +
+                    gap
+                )
             )
 
             rect = pygame.Rect(
@@ -601,7 +1125,9 @@ while running:
 
             pygame.draw.rect(
                 screen,
-                COLORS[colour_index],
+                COLORS[
+                    colour_index
+                ],
                 rect,
                 border_radius=15
             )
@@ -610,31 +1136,44 @@ while running:
             # COLOR NAME
             # -----------------------------------------
 
-            # Use smaller font for smaller boxes
             if box_size < 60:
 
-                name_font = pygame.font.Font(
-                    None,
-                    20
+                name_font = (
+                    pygame.font.Font(
+                        None,
+                        20
+                    )
                 )
 
             elif box_size < 80:
 
-                name_font = pygame.font.Font(
-                    None,
-                    24
+                name_font = (
+                    pygame.font.Font(
+                        None,
+                        24
+                    )
                 )
 
             else:
 
-                name_font = SMALL_FONT
+                name_font = (
+                    SMALL_FONT
+                )
 
             draw_text(
-                COLOR_NAMES[colour_index],
+                COLOR_NAMES[
+                    colour_index
+                ],
                 name_font,
                 WHITE,
-                x + box_size // 2,
-                y + box_size + 25
+                x
+                +
+                box_size // 2,
+                y
+                +
+                box_size
+                +
+                25
             )
 
         # -----------------------------------------------
@@ -647,17 +1186,21 @@ while running:
             sequence_start
         )
 
-        # More colours = more time
         display_time = (
             2.5
             +
-            len(sequence) * 0.5
+            len(sequence)
+            *
+            0.5
         )
 
         if elapsed >= display_time:
 
-            # Go to repeat screen
             game_state = PLAYING
+
+            input_locked = False
+
+            waiting_for_players = False
 
 
     # =====================================================
@@ -666,7 +1209,9 @@ while running:
 
     elif game_state == PLAYING:
 
-        screen.fill(BACKGROUND)
+        screen.fill(
+            BACKGROUND
+        )
 
         # -----------------------------------------------
         # HEADER
@@ -700,13 +1245,29 @@ while running:
             130
         )
 
-        draw_text(
-            "Click the colours in the correct order",
-            SMALL_FONT,
-            GRAY,
-            WIDTH // 2,
-            180
-        )
+        # -----------------------------------------------
+        # STATUS TEXT
+        # -----------------------------------------------
+
+        if waiting_for_players:
+
+            draw_text(
+                "Waiting for other players...",
+                SMALL_FONT,
+                GRAY,
+                WIDTH // 2,
+                180
+            )
+
+        else:
+
+            draw_text(
+                "Click the colours in the correct order",
+                SMALL_FONT,
+                GRAY,
+                WIDTH // 2,
+                180
+            )
 
         # -----------------------------------------------
         # COLOUR BUTTONS
@@ -755,7 +1316,9 @@ while running:
 
     elif game_state == GAME_OVER:
 
-        screen.fill(BACKGROUND)
+        screen.fill(
+            BACKGROUND
+        )
 
         draw_text(
             "GAME OVER",
@@ -782,7 +1345,8 @@ while running:
         )
 
         draw_text(
-            f"You reached Round {round_number}",
+            f"You reached Round "
+            f"{round_number}",
             FONT,
             GRAY,
             WIDTH // 2,
@@ -811,5 +1375,11 @@ while running:
 
     pygame.display.flip()
 
+
+# =========================================================
+# CLOSE NETWORK CONNECTION
+# =========================================================
+
+network.close()
 
 pygame.quit()

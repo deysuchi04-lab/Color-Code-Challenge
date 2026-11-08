@@ -1,5 +1,7 @@
 import socket
 import json
+import threading
+import queue
 
 
 # ==================================================
@@ -11,91 +13,247 @@ PORT = 5000
 
 
 # ==================================================
-# CONNECT TO SERVER
+# NETWORK CLIENT
 # ==================================================
 
-client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+class NetworkClient:
 
-print("Connecting to Colour Code Challenge Server...")
+    def __init__(self, host=HOST, port=PORT):
 
-client.connect((HOST, PORT))
+        self.host = host
+        self.port = port
 
-print("Connected to server!")
+        self.client = None
+        self.reader = None
 
+        self.running = False
 
-# Create a file-like object for reading
-reader = client.makefile("r")
+        # Queue stores messages received from server
+        self.message_queue = queue.Queue()
 
+        # Thread for receiving messages
+        self.receive_thread = None
 
-# ==================================================
-# RECEIVE JSON MESSAGE
-# ==================================================
+    # ==================================================
+    # CONNECT TO SERVER
+    # ==================================================
 
-def receive_message():
-    line = reader.readline()
+    def connect(self):
 
-    if not line:
+        try:
+
+            self.client = socket.socket(
+                socket.AF_INET,
+                socket.SOCK_STREAM
+            )
+
+            self.client.connect(
+                (self.host, self.port)
+            )
+
+            # File-like reader for
+            # newline-separated JSON
+            self.reader = self.client.makefile("r")
+
+            self.running = True
+
+            # Start receiving thread
+            self.receive_thread = threading.Thread(
+                target=self.receive_messages,
+                daemon=True
+            )
+
+            self.receive_thread.start()
+
+            print("Connected to server!")
+
+            return True
+
+        except Exception as e:
+
+            print(
+                "Connection failed:",
+                e
+            )
+
+            return False
+
+    # ==================================================
+    # RECEIVE MESSAGES
+    # ==================================================
+
+    def receive_messages(self):
+
+        while self.running:
+
+            try:
+
+                line = self.reader.readline()
+
+                if not line:
+
+                    break
+
+                message = json.loads(
+                    line.strip()
+                )
+
+                # Put message into queue
+                self.message_queue.put(
+                    message
+                )
+
+            except Exception as e:
+
+                if self.running:
+
+                    print(
+                        "Receive error:",
+                        e
+                    )
+
+                break
+
+        self.running = False
+
+    # ==================================================
+    # SEND MESSAGE
+    # ==================================================
+
+    def send_message(self, message):
+
+        try:
+
+            data = json.dumps(
+                message
+            )
+
+            self.client.sendall(
+                (data + "\n").encode()
+            )
+
+            return True
+
+        except Exception as e:
+
+            print(
+                "Send error:",
+                e
+            )
+
+            return False
+
+    # ==================================================
+    # CHECK RECEIVED MESSAGE
+    # ==================================================
+
+    def get_message(self):
+
+        if not self.message_queue.empty():
+
+            return self.message_queue.get()
+
         return None
 
-    return json.loads(line.strip())
+    # ==================================================
+    # CLOSE CONNECTION
+    # ==================================================
+
+    def close(self):
+
+        self.running = False
+
+        try:
+
+            if self.reader:
+                self.reader.close()
+
+            if self.client:
+                self.client.close()
+
+        except Exception:
+            pass
+
+        print(
+            "Disconnected from server."
+        )
 
 
 # ==================================================
-# RECEIVE WELCOME MESSAGE
+# TEST NETWORK CLIENT
 # ==================================================
 
-message = receive_message()
+if __name__ == "__main__":
 
-print()
-print("Message from server:")
-print(message)
+    import time
 
+    print()
+    print("=" * 50)
+    print("COLOUR CODE CHALLENGE CLIENT")
+    print("=" * 50)
 
-# ==================================================
-# RECEIVE PLAYER COUNT
-# ==================================================
+    network = NetworkClient()
 
-message = receive_message()
+    print()
+    print("Connecting to server...")
 
-print()
-print("Player count message:")
-print(message)
+    if network.connect():
 
+        # Give receive thread time to receive
+        # welcome/player_count messages
+        time.sleep(0.5)
 
-# ==================================================
-# SEND TEST MESSAGE
-# ==================================================
+        # --------------------------------------------------
+        # DISPLAY RECEIVED MESSAGES
+        # --------------------------------------------------
 
-test_message = {
-    "type": "test",
-    "message": "Hello from client"
-}
+        while True:
 
-data = json.dumps(test_message)
+            message = network.get_message()
 
-client.send((data + "\n").encode())
+            if message is None:
+                break
 
-print()
-print("Test message sent to server.")
+            print()
+            print("Message from server:")
+            print(message)
 
+        # --------------------------------------------------
+        # SEND TEST MESSAGE
+        # --------------------------------------------------
 
-# ==================================================
-# RECEIVE TEST RESPONSE
-# ==================================================
+        test_message = {
+            "type": "test",
+            "message": "Hello from network client"
+        }
 
-response = receive_message()
+        network.send_message(
+            test_message
+        )
 
-print()
-print("Response from server:")
-print(response)
+        print()
+        print("Test message sent to server.")
 
+        # --------------------------------------------------
+        # RECEIVE TEST RESPONSE
+        # --------------------------------------------------
 
-# ==================================================
-# CLOSE CONNECTION
-# ==================================================
+        for _ in range(20):
 
-reader.close()
-client.close()
+            response = network.get_message()
 
-print()
-print("Disconnected from server.")
+            if response is not None:
+
+                print()
+                print("Response from server:")
+                print(response)
+
+                if response.get(
+                    "type"
+                ) == "test_response":
+
+                    break
+
+            time.sleep(0.1)
+
+        network.close()

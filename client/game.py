@@ -5,6 +5,10 @@ import time
 from client import NetworkClient
 
 
+# =========================================================
+# INITIALIZE PYGAME
+# =========================================================
+
 pygame.init()
 
 
@@ -148,6 +152,17 @@ waiting_for_players = False
 
 input_locked = False
 
+final_scores = {}
+
+game_result = ""
+
+winner_ids = []
+
+loser_id = None
+
+# Per-player final statistics
+player_stats = {}
+
 
 # =========================================================
 # BUTTONS
@@ -204,7 +219,7 @@ def draw_text(
 ):
 
     image = font.render(
-        text,
+        str(text),
         True,
         color
     )
@@ -275,6 +290,13 @@ def reset_game():
     global game_state
     global waiting_for_players
     global input_locked
+    global final_scores
+    global game_result
+    global winner_ids
+    global loser_id
+    global player_stats
+    global my_completed_rounds
+    global my_failed_round
 
     sequence = []
 
@@ -286,13 +308,26 @@ def reset_game():
 
     message = ""
 
+    final_scores = {}
+
+    game_result = ""
+
+    winner_ids = []
+
+    loser_id = None
+
+    player_stats = {}
+
+    my_completed_rounds = 0
+    my_failed_round = None
+
     waiting_for_players = True
 
     input_locked = True
 
     # -----------------------------------------------------
     # IMPORTANT:
-    # The server will create the first sequence.
+    # The server creates the first sequence.
     # -----------------------------------------------------
 
     game_state = WAITING
@@ -301,7 +336,7 @@ def reset_game():
 # =========================================================
 # NEXT ROUND
 # =========================================================
-#
+
 # The server controls the next round.
 #
 # Therefore this function is kept only for compatibility
@@ -357,6 +392,7 @@ while running:
 
     clock.tick(60)
 
+
     # =====================================================
     # RECEIVE SERVER MESSAGES
     # =====================================================
@@ -371,11 +407,13 @@ while running:
 
             break
 
+
         message_type = (
             network_message.get(
                 "type"
             )
         )
+
 
         # =================================================
         # WELCOME
@@ -399,6 +437,7 @@ while running:
                 f"Player ID: {player_id}"
             )
 
+
         # =================================================
         # PLAYER COUNT
         # =================================================
@@ -417,6 +456,7 @@ while running:
                 f"{server_player_count}"
             )
 
+
         # =================================================
         # READY ACK
         # =================================================
@@ -426,6 +466,7 @@ while running:
             print(
                 "Server confirmed that player is ready."
             )
+
 
         # =================================================
         # ROUND START
@@ -454,16 +495,16 @@ while running:
                 )
             )
 
-            round_number = (
-                global_round
-            )
+            round_number = global_round
 
             sequence = [
                 int(value)
                 for value in new_sequence
             ]
 
-            # Get this player's score
+            # ------------------------------------------------
+            # GET THIS PLAYER'S SCORE
+            # ------------------------------------------------
 
             if player_id is not None:
 
@@ -471,6 +512,8 @@ while running:
                     str(player_id),
                     score
                 )
+
+            final_scores = scores.copy()
 
             waiting_for_players = False
 
@@ -499,7 +542,10 @@ while running:
                 "=" * 40
             )
 
-            # Round 1 starts with countdown
+
+            # ------------------------------------------------
+            # ROUND 1 STARTS WITH COUNTDOWN
+            # ------------------------------------------------
 
             if round_number == 1:
 
@@ -509,6 +555,7 @@ while running:
 
                 show_sequence()
 
+
         # =================================================
         # WAIT FOR OTHER PLAYERS
         # =================================================
@@ -516,16 +563,76 @@ while running:
         elif message_type == "round_wait":
 
             # ------------------------------------------------
-            # IMPORTANT FIX
-            # ------------------------------------------------
-            #
             # Do NOT lock the buttons after the first click.
             #
             # Only lock input when the player has already
             # entered the complete sequence.
             # ------------------------------------------------
 
-            if (
+            server_score = (
+                network_message.get(
+                    "score",
+                    score
+                )
+            )
+
+            server_scores = (
+                network_message.get(
+                    "scores",
+                    final_scores
+                )
+            )
+
+            score = server_score
+
+            final_scores = server_scores.copy()
+
+            # ------------------------------------------------
+            # IMPORTANT:
+            #
+            # The server broadcasts the same round_wait message
+            # to ALL players.
+            #
+            # Therefore, the "failed" field by itself cannot be
+            # used to lock the client. If Player 1 failed, Player 2
+            # must still be allowed to continue entering colours.
+            #
+            # Instead, check whether THIS player's ID is inside
+            # the failed_players list.
+            # ------------------------------------------------
+
+            failed_players = (
+                network_message.get(
+                    "failed_players",
+                    []
+                )
+            )
+
+            failed_this_round = (
+                player_id is not None
+                and (
+                    player_id in failed_players
+                    or str(player_id) in [
+                        str(pid)
+                        for pid in failed_players
+                    ]
+                )
+            )
+
+            if failed_this_round:
+
+                # This player made a mistake.
+                # Lock only THIS player's buttons.
+                # Other players remain free to enter input.
+                waiting_for_players = True
+
+                input_locked = True
+
+                print(
+                    "You entered the wrong sequence."
+                )
+
+            elif (
                 len(player_sequence)
                 >= len(sequence)
                 and len(sequence) > 0
@@ -541,15 +648,52 @@ while running:
 
             else:
 
-                # Player still has colours to enter.
-
+                # Another player may have failed or completed,
+                # but THIS player still has input to enter.
                 waiting_for_players = False
 
                 input_locked = False
 
                 print(
-                    "Player can continue entering the sequence."
+                    "Player can continue entering "
+                    "the sequence."
                 )
+
+
+        # =================================================
+        # INPUT PROGRESS
+        # =================================================
+
+        elif message_type == "input_progress":
+
+            progress = (
+                network_message.get(
+                    "progress",
+                    len(player_sequence)
+                )
+            )
+
+            total = (
+                network_message.get(
+                    "total",
+                    len(sequence)
+                )
+            )
+
+            server_score = (
+                network_message.get(
+                    "score",
+                    score
+                )
+            )
+
+            score = server_score
+
+            print(
+                f"Server progress: "
+                f"{progress}/{total}"
+            )
+
 
         # =================================================
         # GAME OVER
@@ -571,6 +715,101 @@ while running:
                 )
             )
 
+            winner_ids = (
+                network_message.get(
+                    "winners",
+                    []
+                )
+            )
+
+            loser_id = (
+                network_message.get(
+                    "loser",
+                    None
+                )
+            )
+
+            # ------------------------------------------------
+            # GET PER-PLAYER FINAL STATISTICS
+            # ------------------------------------------------
+            #
+            # Expected server format:
+            #
+            # "player_stats": {
+            #     "1": {
+            #         "score": 30,
+            #         "completed_rounds": 3,
+            #         "failed_round": None
+            #     },
+            #     "2": {
+            #         "score": 20,
+            #         "completed_rounds": 2,
+            #         "failed_round": 3
+            #     }
+            # }
+            #
+            # Keep a fallback for older server messages so the
+            # client does not crash if player_stats is missing.
+            # ------------------------------------------------
+
+            received_player_stats = (
+                network_message.get(
+                    "player_stats",
+                    {}
+                )
+            )
+
+            if received_player_stats:
+
+                player_stats = received_player_stats.copy()
+
+            else:
+
+                # Fallback: build basic statistics from scores.
+                player_stats = {}
+
+                for pid, player_score in scores.items():
+
+                    player_stats[str(pid)] = {
+                        "score": player_score,
+                        "completed_rounds": 0,
+                        "failed_round": None
+                    }
+
+                # If the server has not yet sent per-player
+                # round statistics, use the current round as
+                # the best available information.
+                for pid in player_stats:
+
+                    if (
+                        str(pid)
+                        == str(loser_id)
+                    ):
+
+                        player_stats[pid][
+                            "completed_rounds"
+                        ] = max(
+                            0,
+                            round_number - 1
+                        )
+
+                        player_stats[pid][
+                            "failed_round"
+                        ] = round_number
+
+                    else:
+
+                        player_stats[pid][
+                            "completed_rounds"
+                        ] = round_number
+
+
+            final_scores = scores.copy()
+
+            # ------------------------------------------------
+            # GET THIS PLAYER'S FINAL SCORE AND STATISTICS
+            # ------------------------------------------------
+
             if player_id is not None:
 
                 score = scores.get(
@@ -578,13 +817,132 @@ while running:
                     score
                 )
 
-            message = reason
+            my_stats = player_stats.get(
+                str(player_id),
+                {}
+            )
+
+            my_completed_rounds = my_stats.get(
+                "completed_rounds",
+                round_number
+            )
+
+            my_failed_round = my_stats.get(
+                "failed_round",
+                None
+            )
+
+            # ------------------------------------------------
+            # GET ALL LOSERS
+            # ------------------------------------------------
+            #
+            # When both players make a wrong move in the same
+            # round, there is no winner. Both players are losers.
+            # ------------------------------------------------
+
+            loser_ids = (
+                network_message.get(
+                    "losers",
+                    []
+                )
+            )
+
+            # Backward compatibility with the older server:
+            # if "losers" is missing, use the single "loser".
+            if not loser_ids and loser_id is not None:
+
+                loser_ids = [
+                    loser_id
+                ]
+
+            loser_ids = [
+                int(pid)
+                for pid in loser_ids
+            ]
+
+            # ------------------------------------------------
+            # DETERMINE RESULT
+            # ------------------------------------------------
+
+            if player_id in winner_ids:
+
+                game_result = "YOU WIN!"
+
+                # Winner did not make the wrong move.
+                # Tell them who caused the game to end.
+                if len(loser_ids) == 1:
+
+                    message = (
+                        f"Player {loser_ids[0]} entered "
+                        f"the wrong sequence."
+                    )
+
+                elif len(loser_ids) > 1:
+
+                    message = (
+                        "The other players entered "
+                        "the wrong sequence."
+                    )
+
+                else:
+
+                    message = "Game completed."
+
+            elif player_id in loser_ids:
+
+                # This player is one of the players who made
+                # a wrong move.
+
+                game_result = "YOU LOST!"
+
+                # If every player failed in this round,
+                # there is no winner.
+                if (
+                    len(loser_ids)
+                    == len(scores)
+                    and len(loser_ids) > 1
+                ):
+
+                    if len(loser_ids) == 2:
+
+                        message = (
+                            "You both entered the wrong sequence!"
+                        )
+
+                    else:
+
+                        message = (
+                            "All players entered the wrong sequence!"
+                        )
+
+                else:
+
+                    message = (
+                        "You entered the wrong sequence!"
+                    )
+
+            else:
+
+                # Fallback for an unexpected server state.
+                game_result = "GAME OVER"
+
+                message = reason
+
+            # Store the final round information locally.
+            # This is used only if the server does not provide
+            # per-player statistics.
+            round_number = (
+                my_failed_round
+                if my_failed_round is not None
+                else my_completed_rounds
+            )
 
             waiting_for_players = False
 
             input_locked = True
 
             game_state = GAME_OVER
+
 
             print()
 
@@ -597,16 +955,25 @@ while running:
             )
 
             print(
-                reason
+                f"Result: {game_result}"
             )
 
             print(
-                f"Score: {score}"
+                f"Reason: {reason}"
+            )
+
+            print(
+                f"Final Score: {score}"
+            )
+
+            print(
+                f"All Scores: {scores}"
             )
 
             print(
                 "=" * 40
             )
+
 
         # =================================================
         # OTHER SERVER MESSAGES
@@ -625,6 +992,7 @@ while running:
     # =====================================================
 
     for event in pygame.event.get():
+
 
         # =================================================
         # QUIT
@@ -651,7 +1019,7 @@ while running:
             network.send_message(
                 {
                     "type":
-                    "player_ready"
+                        "player_ready"
                 }
             )
 
@@ -699,6 +1067,7 @@ while running:
                             - 1
                         )
 
+
                         # ---------------------------------
                         # SEND CLICK TO SERVER
                         # ---------------------------------
@@ -706,17 +1075,19 @@ while running:
                         network.send_message(
                             {
                                 "type":
-                                "color_click",
+                                    "color_click",
 
                                 "color":
-                                i
+                                    i
                             }
                         )
+
 
                         print(
                             f"Colour clicked: "
                             f"{COLOR_NAMES[i]}"
                         )
+
 
                         # ---------------------------------
                         # WRONG COLOUR
@@ -731,15 +1102,14 @@ while running:
                             ]
                         ):
 
-                            message = (
-                                "Wrong sequence!"
-                            )
+                            # IMPORTANT:
+                            # The server is now the
+                            # authority for GAME OVER.
 
                             input_locked = True
 
-                            waiting_for_players = False
+                            waiting_for_players = True
 
-                            game_state = GAME_OVER
 
                         # ---------------------------------
                         # COMPLETE SEQUENCE
@@ -756,7 +1126,8 @@ while running:
 
                             # ---------------------------------
                             # The player has finished.
-                            # Now we can wait for other players.
+                            # Wait for the server to tell
+                            # us when the next round starts.
                             # ---------------------------------
 
                             input_locked = True
@@ -767,13 +1138,13 @@ while running:
                                 "Sequence completed."
                             )
 
+
                         # ---------------------------------
                         # MORE COLOURS ARE REQUIRED
                         # ---------------------------------
 
                         else:
 
-                            # IMPORTANT:
                             # Keep buttons active.
                             #
                             # Example:
@@ -815,7 +1186,7 @@ while running:
                     network.send_message(
                         {
                             "type":
-                            "player_ready"
+                                "player_ready"
                         }
                     )
 
@@ -836,6 +1207,7 @@ while running:
             BACKGROUND
         )
 
+
         draw_text(
             "COLOUR CODE",
             TITLE_FONT,
@@ -852,12 +1224,14 @@ while running:
             190
         )
 
+
         pygame.draw.rect(
             screen,
             BLUE,
             start_button,
             border_radius=15
         )
+
 
         draw_text(
             "START GAME",
@@ -867,6 +1241,7 @@ while running:
             365
         )
 
+
         draw_text(
             "Remember → Reproduce → Win!",
             SMALL_FONT,
@@ -874,6 +1249,7 @@ while running:
             WIDTH // 2,
             500
         )
+
 
         draw_text(
             f"Players Online: "
@@ -895,6 +1271,7 @@ while running:
             BACKGROUND
         )
 
+
         draw_text(
             "COLOUR CODE",
             TITLE_FONT,
@@ -903,6 +1280,7 @@ while running:
             150
         )
 
+
         draw_text(
             "Waiting for players...",
             BIG_FONT,
@@ -910,6 +1288,7 @@ while running:
             WIDTH // 2,
             270
         )
+
 
         draw_text(
             f"Players Online: "
@@ -931,6 +1310,7 @@ while running:
             BACKGROUND
         )
 
+
         draw_text(
             f"ROUND {round_number}",
             BIG_FONT,
@@ -939,6 +1319,7 @@ while running:
             150
         )
 
+
         draw_text(
             "GET READY!",
             TITLE_FONT,
@@ -946,6 +1327,7 @@ while running:
             WIDTH // 2,
             230
         )
+
 
         elapsed = (
             time.time()
@@ -958,6 +1340,7 @@ while running:
             -
             int(elapsed)
         )
+
 
         if number > 0:
 
@@ -984,6 +1367,7 @@ while running:
             BACKGROUND
         )
 
+
         # -----------------------------------------------
         # ROUND
         # -----------------------------------------------
@@ -996,6 +1380,7 @@ while running:
             80
         )
 
+
         # -----------------------------------------------
         # TITLE
         # -----------------------------------------------
@@ -1007,6 +1392,7 @@ while running:
             WIDTH // 2,
             140
         )
+
 
         # -----------------------------------------------
         # CALCULATE BOX SIZE
@@ -1024,6 +1410,7 @@ while running:
 
         gap = 30
 
+
         # -----------------------------------------------
         # REDUCE BOX SIZE FOR LONG SEQUENCES
         # -----------------------------------------------
@@ -1034,17 +1421,20 @@ while running:
 
             gap = 18
 
+
         if sequence_length >= 9:
 
             box_size = 65
 
             gap = 12
 
+
         if sequence_length >= 12:
 
             box_size = 55
 
             gap = 10
+
 
         # -----------------------------------------------
         # CALCULATE TOTAL WIDTH
@@ -1057,6 +1447,7 @@ while running:
             (sequence_length - 1)
             * gap
         )
+
 
         # -----------------------------------------------
         # SAFETY CHECK
@@ -1076,6 +1467,7 @@ while running:
                 35
             )
 
+
             total_width = (
                 sequence_length
                 * box_size
@@ -1083,6 +1475,7 @@ while running:
                 (sequence_length - 1)
                 * gap
             )
+
 
         # -----------------------------------------------
         # CENTER THE SEQUENCE
@@ -1095,6 +1488,7 @@ while running:
         ) // 2
 
         y = 250
+
 
         # -----------------------------------------------
         # DRAW COMPLETE SEQUENCE
@@ -1116,12 +1510,14 @@ while running:
                 )
             )
 
+
             rect = pygame.Rect(
                 x,
                 y,
                 box_size,
                 box_size
             )
+
 
             pygame.draw.rect(
                 screen,
@@ -1131,6 +1527,7 @@ while running:
                 rect,
                 border_radius=15
             )
+
 
             # -----------------------------------------
             # COLOR NAME
@@ -1160,6 +1557,7 @@ while running:
                     SMALL_FONT
                 )
 
+
             draw_text(
                 COLOR_NAMES[
                     colour_index
@@ -1176,6 +1574,7 @@ while running:
                 25
             )
 
+
         # -----------------------------------------------
         # DISPLAY TIME
         # -----------------------------------------------
@@ -1186,6 +1585,7 @@ while running:
             sequence_start
         )
 
+
         display_time = (
             2.5
             +
@@ -1193,6 +1593,7 @@ while running:
             *
             0.5
         )
+
 
         if elapsed >= display_time:
 
@@ -1213,6 +1614,7 @@ while running:
             BACKGROUND
         )
 
+
         # -----------------------------------------------
         # HEADER
         # -----------------------------------------------
@@ -1225,6 +1627,7 @@ while running:
             50
         )
 
+
         draw_text(
             f"Score: {score}",
             FONT,
@@ -1232,6 +1635,7 @@ while running:
             780,
             50
         )
+
 
         # -----------------------------------------------
         # TITLE
@@ -1244,6 +1648,7 @@ while running:
             WIDTH // 2,
             130
         )
+
 
         # -----------------------------------------------
         # STATUS TEXT
@@ -1269,6 +1674,7 @@ while running:
                 180
             )
 
+
         # -----------------------------------------------
         # COLOUR BUTTONS
         # -----------------------------------------------
@@ -1284,6 +1690,7 @@ while running:
                 border_radius=20
             )
 
+
             draw_text(
                 COLOR_NAMES[i],
                 SMALL_FONT,
@@ -1291,6 +1698,7 @@ while running:
                 button.centerx,
                 button.centery
             )
+
 
         # -----------------------------------------------
         # PROGRESS
@@ -1300,6 +1708,7 @@ while running:
             f"{len(player_sequence)} / "
             f"{len(sequence)}"
         )
+
 
         draw_text(
             progress,
@@ -1320,37 +1729,184 @@ while running:
             BACKGROUND
         )
 
+
+        # -----------------------------------------------
+        # RESULT
+        # -----------------------------------------------
+
+        if game_result == "YOU WIN!":
+
+            result_color = GREEN
+
+        elif game_result == "YOU LOST!":
+
+            result_color = RED
+
+        else:
+
+            result_color = WHITE
+
+
         draw_text(
-            "GAME OVER",
+            game_result,
             TITLE_FONT,
-            RED,
+            result_color,
             WIDTH // 2,
-            150
+            120
         )
+
 
         draw_text(
             message,
             FONT,
             WHITE,
             WIDTH // 2,
-            230
+            190
         )
+
 
         draw_text(
             f"Final Score: {score}",
             BIG_FONT,
             WHITE,
             WIDTH // 2,
-            300
+            260
         )
 
+
+        # -----------------------------------------------
+        # PLAYER ROUND INFORMATION
+        # -----------------------------------------------
+
+        if my_failed_round is not None:
+
+            draw_text(
+                f"Completed Rounds: "
+                f"{my_completed_rounds}",
+                SMALL_FONT,
+                GRAY,
+                WIDTH // 2,
+                315
+            )
+
+            draw_text(
+                f"Failed in Round: "
+                f"{my_failed_round}",
+                SMALL_FONT,
+                GRAY,
+                WIDTH // 2,
+                350
+            )
+
+        else:
+
+            draw_text(
+                f"Completed Rounds: "
+                f"{my_completed_rounds}",
+                SMALL_FONT,
+                GRAY,
+                WIDTH // 2,
+                325
+            )
+
+
+        # -----------------------------------------------
+        # FINAL SCOREBOARD
+        # -----------------------------------------------
+
+        y = 395
+
         draw_text(
-            f"You reached Round "
-            f"{round_number}",
-            FONT,
+            "FINAL SCORES",
+            SMALL_FONT,
             GRAY,
             WIDTH // 2,
-            350
+            y
+        )
+
+        y += 32
+
+
+        # ------------------------------------------------
+        # SIMPLE FINAL SCOREBOARD
+        # ------------------------------------------------
+        #
+        # YOU is ALWAYS shown first.
+        #
+        # Example:
+        #
+        # YOU: 20
+        # PLAYER 1: 30
+        #
+        # The order does not depend on whether the player
+        # won or lost.
+        # ------------------------------------------------
+
+        scoreboard_order = []
+
+        if player_id is not None:
+
+            own_id = str(player_id)
+
+            if own_id in final_scores:
+
+                scoreboard_order.append(
+                    own_id
+                )
+
+        # Add all other players after YOU.
+        for pid in sorted(
+            final_scores.keys(),
+            key=lambda value: int(value)
+        ):
+
+            if (
+                player_id is None
+                or str(pid) != str(player_id)
+            ):
+
+                scoreboard_order.append(
+                    str(pid)
+                )
+
+        for pid in scoreboard_order:
+
+            if (
+                player_id is not None
+                and str(pid) == str(player_id)
+            ):
+
+                prefix = "YOU"
+
+            else:
+
+                prefix = f"PLAYER {pid}"
+
+            draw_text(
+                f"{prefix}: {final_scores[pid]}",
+                SMALL_FONT,
+                WHITE,
+                WIDTH // 2,
+                y
+            )
+
+            y += 32
+
+
+        # -----------------------------------------------
+        # PLAY AGAIN BUTTON
+        # -----------------------------------------------
+
+        # Keep the button below the scoreboard so that
+        # player scores are never covered by the button.
+        button_y = max(
+            500,
+            y + 10
+        )
+
+        play_again_button.topleft = (
+            325,
+            button_y
         )
 
         pygame.draw.rect(
@@ -1364,13 +1920,12 @@ while running:
             "PLAY AGAIN",
             FONT,
             WHITE,
-            WIDTH // 2,
-            455
+            play_again_button.centerx,
+            play_again_button.centery
         )
 
-
     # =====================================================
-    # UPDATE
+    # UPDATE DISPLAY
     # =====================================================
 
     pygame.display.flip()

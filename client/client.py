@@ -8,8 +8,10 @@ import queue
 # SERVER SETTINGS
 # ==================================================
 
-HOST = "127.0.0.1"
-PORT = 5000
+# OpenPort public server address
+# Players from different locations will connect here.
+HOST = "193.26.115.30"
+PORT = 35438
 
 
 # ==================================================
@@ -28,10 +30,8 @@ class NetworkClient:
 
         self.running = False
 
-        # Queue stores messages received from server
         self.message_queue = queue.Queue()
 
-        # Thread for receiving messages
         self.receive_thread = None
 
     # ==================================================
@@ -42,18 +42,32 @@ class NetworkClient:
 
         try:
 
+            print()
+            print("Connecting to server...")
+            print(f"Server: {self.host}:{self.port}")
+
             self.client = socket.socket(
                 socket.AF_INET,
                 socket.SOCK_STREAM
             )
 
+            # Connection timeout
+            self.client.settimeout(10)
+
             self.client.connect(
                 (self.host, self.port)
             )
 
-            # File-like reader for
-            # newline-separated JSON
-            self.reader = self.client.makefile("r")
+            # Remove timeout after connection
+            # because the game needs a persistent connection
+            self.client.settimeout(None)
+
+            # Create file-like reader
+            # for newline-separated JSON messages
+            self.reader = self.client.makefile(
+                "r",
+                encoding="utf-8"
+            )
 
             self.running = True
 
@@ -71,10 +85,21 @@ class NetworkClient:
 
         except Exception as e:
 
-            print(
-                "Connection failed:",
-                e
-            )
+            print()
+            print("Connection failed:")
+            print(e)
+
+            try:
+
+                if self.client:
+                    self.client.close()
+
+            except Exception:
+                pass
+
+            self.client = None
+            self.reader = None
+            self.running = False
 
             return False
 
@@ -90,18 +115,30 @@ class NetworkClient:
 
                 line = self.reader.readline()
 
+                # Server closed connection
                 if not line:
-
                     break
 
+                # Convert JSON text to Python dictionary
                 message = json.loads(
                     line.strip()
                 )
 
-                # Put message into queue
+                # Store message in queue
                 self.message_queue.put(
                     message
                 )
+
+            except json.JSONDecodeError as e:
+
+                if self.running:
+
+                    print(
+                        "Invalid JSON received:",
+                        e
+                    )
+
+                continue
 
             except Exception as e:
 
@@ -116,20 +153,37 @@ class NetworkClient:
 
         self.running = False
 
+        print(
+            "Connection to server closed."
+        )
+
     # ==================================================
     # SEND MESSAGE
     # ==================================================
 
     def send_message(self, message):
 
+        if not self.client or not self.running:
+
+            print(
+                "Not connected to server."
+            )
+
+            return False
+
         try:
 
+            # Convert Python dictionary
+            # into JSON
             data = json.dumps(
                 message
             )
 
+            # Send one JSON message per line
             self.client.sendall(
-                (data + "\n").encode()
+                (
+                    data + "\n"
+                ).encode("utf-8")
             )
 
             return True
@@ -141,6 +195,8 @@ class NetworkClient:
                 e
             )
 
+            self.running = False
+
             return False
 
     # ==================================================
@@ -151,7 +207,9 @@ class NetworkClient:
 
         if not self.message_queue.empty():
 
-            return self.message_queue.get()
+            return (
+                self.message_queue.get()
+            )
 
         return None
 
@@ -168,11 +226,30 @@ class NetworkClient:
             if self.reader:
                 self.reader.close()
 
+        except Exception:
+            pass
+
+        try:
+
+            if self.client:
+
+                self.client.shutdown(
+                    socket.SHUT_RDWR
+                )
+
+        except Exception:
+            pass
+
+        try:
+
             if self.client:
                 self.client.close()
 
         except Exception:
             pass
+
+        self.reader = None
+        self.client = None
 
         print(
             "Disconnected from server."
@@ -185,46 +262,114 @@ class NetworkClient:
 
 if __name__ == "__main__":
 
+    import argparse
     import time
+
+    # --------------------------------------------------
+    # COMMAND LINE SETTINGS
+    # --------------------------------------------------
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Colour Code Challenge "
+            "Network Client"
+        )
+    )
+
+    parser.add_argument(
+        "--host",
+        default=HOST,
+        help=(
+            "Server IP address "
+            "or hostname"
+        )
+    )
+
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=PORT,
+        help=(
+            "Server TCP port"
+        )
+    )
+
+    args = parser.parse_args()
+
+    # --------------------------------------------------
+    # START CLIENT
+    # --------------------------------------------------
 
     print()
     print("=" * 50)
     print("COLOUR CODE CHALLENGE CLIENT")
     print("=" * 50)
 
-    network = NetworkClient()
-
     print()
-    print("Connecting to server...")
+    print(
+        "Internet multiplayer mode"
+    )
+
+    print(
+        f"Server: {args.host}:{args.port}"
+    )
+
+    # --------------------------------------------------
+    # CREATE NETWORK CLIENT
+    # --------------------------------------------------
+
+    network = NetworkClient(
+        host=args.host,
+        port=args.port
+    )
+
+    # --------------------------------------------------
+    # CONNECT
+    # --------------------------------------------------
 
     if network.connect():
 
-        # Give receive thread time to receive
-        # welcome/player_count messages
+        # Give receiving thread
+        # some time to receive
+        # initial server messages
+
         time.sleep(0.5)
 
-        # --------------------------------------------------
-        # DISPLAY RECEIVED MESSAGES
-        # --------------------------------------------------
+        # ------------------------------------------------
+        # DISPLAY INITIAL MESSAGES
+        # ------------------------------------------------
 
         while True:
 
-            message = network.get_message()
+            message = (
+                network.get_message()
+            )
 
             if message is None:
                 break
 
             print()
-            print("Message from server:")
-            print(message)
+            print(
+                "Message from server:"
+            )
 
-        # --------------------------------------------------
+            print(
+                message
+            )
+
+        # ------------------------------------------------
         # SEND TEST MESSAGE
-        # --------------------------------------------------
+        # ------------------------------------------------
 
         test_message = {
+
             "type": "test",
-            "message": "Hello from network client"
+
+            "message": (
+                "Hello from "
+                "Internet network client"
+            )
+
         }
 
         network.send_message(
@@ -232,28 +377,68 @@ if __name__ == "__main__":
         )
 
         print()
-        print("Test message sent to server.")
+        print(
+            "Test message sent to server."
+        )
 
-        # --------------------------------------------------
-        # RECEIVE TEST RESPONSE
-        # --------------------------------------------------
+        # ------------------------------------------------
+        # WAIT FOR TEST RESPONSE
+        # ------------------------------------------------
 
-        for _ in range(20):
+        for _ in range(30):
 
-            response = network.get_message()
+            response = (
+                network.get_message()
+            )
 
             if response is not None:
 
                 print()
-                print("Response from server:")
-                print(response)
+                print(
+                    "Response from server:"
+                )
 
-                if response.get(
-                    "type"
-                ) == "test_response":
+                print(
+                    response
+                )
+
+                if (
+                    response.get("type")
+                    == "test_response"
+                ):
 
                     break
 
             time.sleep(0.1)
 
+        # ------------------------------------------------
+        # CLOSE
+        # ------------------------------------------------
+
         network.close()
+
+    else:
+
+        print()
+        print(
+            "Could not connect to "
+            "Colour Code Challenge server."
+        )
+
+        print()
+        print(
+            "Make sure:"
+        )
+
+        print(
+            "1. server.py is running"
+        )
+
+        print(
+            "2. OpenPort is connected"
+        )
+
+        print(
+            "3. OpenPort forwards "
+            "port 35438 to local port 5000"
+        )

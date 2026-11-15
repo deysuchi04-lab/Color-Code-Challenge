@@ -350,14 +350,39 @@ def next_round():
 
 
 # =========================================================
+# SERVER CONNECTION SETTINGS
+# =========================================================
+
+# The game automatically connects to the public Internet
+# address provided by OpenPort.
+#
+# Players do NOT need to enter the server IP or port.
+#
+# OpenPort forwards:                                      
+#     193.26.115.30:35438:35438 -> this PC:5000
+#
+# The server itself still runs on port 5000.
+# =========================================================
+
+SERVER_HOST = "193.26.115.30"
+SERVER_PORT = 35438
+
+
+# =========================================================
 # NETWORK CONNECTION
 # =========================================================
 
-network = NetworkClient()
+network = NetworkClient(
+    host=SERVER_HOST,
+    port=SERVER_PORT
+)
 
 print()
 print(
     "Connecting game to Colour Code Challenge Server..."
+)
+print(
+    f"Server: {SERVER_HOST}:{SERVER_PORT}"
 )
 
 if network.connect():
@@ -373,7 +398,7 @@ else:
     )
 
     print(
-        "Make sure server/server.py is running."
+        "Check that server.py is running and OpenPort is connected."
     )
 
 
